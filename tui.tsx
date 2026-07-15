@@ -32,9 +32,21 @@ const REFRESH_MS = resolveRefreshMs();
 interface SessionInfo {
   id: string;
   parentID?: string;
+}
+
+// As of @opencode-ai/plugin 1.14+ (OpenCode 1.17/1.18), cost and token usage
+// no longer live on the Session object. They live on each assistant message,
+// which also carries the `agent` that produced it. We aggregate from there.
+interface AssistantMessageInfo {
+  role: "assistant" | string;
   agent?: string;
   cost?: number;
-  tokens?: { input?: number; output?: number };
+  tokens?: {
+    input?: number;
+    output?: number;
+    reasoning?: number;
+    cache?: { read?: number; write?: number };
+  };
 }
 
 interface AgentGroup {
@@ -42,7 +54,7 @@ interface AgentGroup {
   cost: number;
   tokIn: number;
   tokOut: number;
-  sessionCount: number;
+  sessionCount: number; // number of assistant messages attributed to this agent
 }
 
 interface CostState {
@@ -118,22 +130,24 @@ function gatherSubtree(
 // =============================================================================
 // 6. Agent Aggregation
 // =============================================================================
+// Aggregates cost/tokens from assistant messages, grouped by the agent that
+// produced each message. Because attribution is per-message (not per-session),
+// this correctly splits costs even when Plan/Build share one session.
 function groupByAgent(
-  sessions: SessionInfo[],
-  subtree: Set<string>,
+  messages: AssistantMessageInfo[],
 ): { agents: AgentGroup[]; totalCost: number; totalTok: number } {
   const byAgent = new Map<string, AgentGroup>();
-  for (const s of sessions) {
-    if (!subtree.has(s.id)) continue;
-    const agent = s.agent || "other";
+  for (const m of messages) {
+    if (m.role !== "assistant") continue;
+    const agent = m.agent || "other";
     let group = byAgent.get(agent);
     if (!group) {
       group = { agent, cost: 0, tokIn: 0, tokOut: 0, sessionCount: 0 };
       byAgent.set(agent, group);
     }
-    group.cost += s.cost || 0;
-    group.tokIn += s.tokens?.input || 0;
-    group.tokOut += s.tokens?.output || 0;
+    group.cost += m.cost || 0;
+    group.tokIn += m.tokens?.input || 0;
+    group.tokOut += m.tokens?.output || 0;
     group.sessionCount += 1;
   }
   const agents = [...byAgent.values()].sort((a, b) => b.cost - a.cost);
@@ -172,14 +186,30 @@ const tui: TuiPlugin = async (api) => {
       try {
         const dir = api.state.path.directory;
         const sessionsRes = await api.client.session.list({
-          query: { directory: dir },
+          directory: dir,
         });
         if (disposed || myLoadId !== loadId) return;
 
         const sessions: SessionInfo[] = sessionsRes.data || [];
         const index = buildSessionIndex(sessions);
         const subtree = gatherSubtree(sessionId, index);
-        const result = groupByAgent(sessions, subtree);
+
+        // Cost/tokens now live on assistant messages, not on the session.
+        // Fetch messages for every session in the subtree and aggregate.
+        const messages: AssistantMessageInfo[] = [];
+        for (const sid of subtree) {
+          const msgRes = await api.client.session.messages({
+            sessionID: sid,
+            directory: dir,
+          });
+          if (disposed || myLoadId !== loadId) return;
+          for (const entry of msgRes.data || []) {
+            const info = entry?.info as AssistantMessageInfo | undefined;
+            if (info && info.role === "assistant") messages.push(info);
+          }
+        }
+
+        const result = groupByAgent(messages);
 
         if (disposed || myLoadId !== loadId) return;
 
@@ -194,11 +224,9 @@ const tui: TuiPlugin = async (api) => {
         lastError = e instanceof Error ? e.message : String(e);
 
         await api.client.app.log({
-          body: {
-            service: "opencode-costs",
-            level: "error",
-            message: `Failed to load costs (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${lastError}`,
-          },
+          service: "opencode-costs",
+          level: "error",
+          message: `Failed to load costs (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${lastError}`,
         });
 
         if (attempt < MAX_RETRIES) {
