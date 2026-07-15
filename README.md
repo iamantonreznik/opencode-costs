@@ -38,15 +38,12 @@ Done. Costs will appear in the sidebar on your next session.
 
 ## How it works
 
-Reads session history via OpenCode API, groups by agent (e.g. `plan`, `build`, `default`),
-shows cumulative cost ($) and token usage in the sidebar. Refreshes automatically when
-sessions are created, updated, or selected.
+Reads assistant messages from the current OpenCode session tree, groups their cost and
+token usage by agent (e.g. `plan`, `build`, `default`), and shows the totals in the
+sidebar. Refreshes automatically when sessions are created, updated, or selected.
 
 ## Known Limitations
 
-- **Agent attribution when switching with Tab:** OpenCode reuses the same session when
-  switching between Plan/Build agents, so all costs are attributed to the last active
-  agent. This is an API limitation, not a plugin bug. Totals ($, tok) remain correct.
 - **Current directory only:** Only sessions from the current project directory are shown.
 - **TUI only:** This plugin only works in TUI mode, not CLI.
 
