@@ -7,24 +7,12 @@ import type { TuiPlugin, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { Show, createEffect, createSignal, onCleanup } from "solid-js";
 
 // =============================================================================
-// 2. Constants & Configuration
+// 2. Constants
 // =============================================================================
 const id = "opencode-costs";
 const SIDEBAR_ORDER = 140;
-const DEFAULT_REFRESH_MS = 15_000;
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2_000; // doubles each attempt
-
-function resolveRefreshMs(): number {
-  const env = process.env.OPENCODE_COSTS_REFRESH_MS;
-  if (env && /^\d+$/.test(env)) {
-    const n = parseInt(env, 10);
-    if (n >= 1000) return n;
-  }
-  return DEFAULT_REFRESH_MS;
-}
-
-const REFRESH_MS = resolveRefreshMs();
 
 // =============================================================================
 // 3. Types
@@ -172,7 +160,7 @@ const tui: TuiPlugin = async (api) => {
       try {
         const dir = api.state.path.directory;
         const sessionsRes = await api.client.session.list({
-          query: { directory: dir },
+          directory: dir,
         });
         if (disposed || myLoadId !== loadId) return;
 
@@ -193,13 +181,15 @@ const tui: TuiPlugin = async (api) => {
       } catch (e: unknown) {
         lastError = e instanceof Error ? e.message : String(e);
 
-        await api.client.app.log({
-          body: {
+        try {
+          await api.client.app.log({
             service: "opencode-costs",
             level: "error",
             message: `Failed to load costs (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${lastError}`,
-          },
-        });
+          });
+        } catch {
+          // Logging must not interrupt retries for the original request.
+        }
 
         if (attempt < MAX_RETRIES) {
           await new Promise((r) =>
@@ -220,13 +210,9 @@ const tui: TuiPlugin = async (api) => {
   }
 
   // ---------------------------------------------------------------------------
-  // Reactive effect — timers + event subscriptions
+  // Reactive effect — event subscriptions
   // ---------------------------------------------------------------------------
   createEffect(() => {
-    const interval = setInterval(() => {
-      if (lastSessionId) load(lastSessionId);
-    }, REFRESH_MS);
-
     const u1 = api.event.on("session.created", () => {
       if (lastSessionId) load(lastSessionId);
     });
@@ -243,7 +229,6 @@ const tui: TuiPlugin = async (api) => {
 
     onCleanup(() => {
       disposed = true;
-      clearInterval(interval);
       u1();
       u2();
       u3();

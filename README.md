@@ -36,23 +36,11 @@ consult  $0.011319  70.7K tok  (1)
 
 Done. Costs will appear in the sidebar on your next session.
 
-## Configuration
-
-Override the refresh interval via environment variable:
-
-```bash
-OPENCODE_COSTS_REFRESH_MS=30000 opencode
-```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `OPENCODE_COSTS_REFRESH_MS` | `15000` | Sidebar refresh interval in milliseconds (min 1000) |
-
 ## How it works
 
 Reads session history via OpenCode API, groups by agent (e.g. `plan`, `build`, `default`),
-shows cumulative cost ($) and token usage in the sidebar. Refreshes automatically and on
-session events.
+shows cumulative cost ($) and token usage in the sidebar. Refreshes automatically when
+sessions are created, updated, or selected.
 
 ## Known Limitations
 
